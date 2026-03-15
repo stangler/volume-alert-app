@@ -1,0 +1,174 @@
+//@version=6
+indicator("出来高急増アラート", overlay=false)
+
+// === 設定パラメータ ===
+volume_multiplier = input.float(2.0, title="出来高倍率", minval=1.0, maxval=10.0, step=0.1, tooltip="平均出来高の何倍で急増と判定するか")
+lookback_period = input.int(20, title="平均出来高の計算期間", minval=5, maxval=100, tooltip="過去何本のローソク足で平均出来高を計算するか")
+
+// === 午前セッション設定 ===
+enable_morning = input.bool(true, title="午前セッションを有効", group="取引時間設定")
+morning_start_hour = input.int(9, title="午前開始時間（時）", minval=0, maxval=23, group="取引時間設定")
+morning_start_minute = input.int(0, title="午前開始時間（分）", minval=0, maxval=59, group="取引時間設定")
+morning_end_hour = input.int(11, title="午前終了時間（時）", minval=0, maxval=23, group="取引時間設定")
+morning_end_minute = input.int(30, title="午前終了時間（分）", minval=0, maxval=59, group="取引時間設定")
+
+// === 午後セッション設定 ===
+enable_afternoon = input.bool(true, title="午後セッションを有効", group="取引時間設定")
+afternoon_start_hour = input.int(12, title="午後開始時間（時）", minval=0, maxval=23, group="取引時間設定")
+afternoon_start_minute = input.int(30, title="午後開始時間（分）", minval=0, maxval=59, group="取引時間設定")
+afternoon_end_hour = input.int(15, title="午後終了時間（時）", minval=0, maxval=23, group="取引時間設定")
+afternoon_end_minute = input.int(0, title="午後終了時間（分）", minval=0, maxval=59, group="取引時間設定")
+
+// === 音声通知設定 ===
+// enable_sound = input.bool(true, title="音声通知を有効にする", tooltip="出来高急増時に音声で通知します", group="通知設定")
+// sound_type = input.string("Alert", title="通知音タイプ", options=["Alert", "Ding", "Note", "Bell", "Chime", "Hand"], tooltip="通知音の種類を選択", group="通知設定")
+
+// === 現在の時刻を取得 ===
+current_hour = hour(time, "GMT+9")
+current_min = minute(time, "GMT+9")
+
+// 指定時間帯内かどうかの判定
+morning_start_time_minutes = morning_start_hour * 60 + morning_start_minute
+morning_end_time_minutes = morning_end_hour * 60 + morning_end_minute
+afternoon_start_time_minutes = afternoon_start_hour * 60 + afternoon_start_minute
+afternoon_end_time_minutes = afternoon_end_hour * 60 + afternoon_end_minute
+current_time_minutes = current_hour * 60 + current_min
+
+// 午前セッション中かどうか
+is_morning_session = enable_morning and (current_time_minutes >= morning_start_time_minutes and current_time_minutes <= morning_end_time_minutes)
+
+// 午後セッション中かどうか
+is_afternoon_session = enable_afternoon and (current_time_minutes >= afternoon_start_time_minutes and current_time_minutes <= afternoon_end_time_minutes)
+
+// いずれかのセッション中かどうか
+is_within_time_range = is_morning_session or is_afternoon_session
+
+// === 出来高の分析 ===
+// 過去の出来高平均を計算
+avg_volume = ta.sma(volume[1], lookback_period)
+
+// 現在の出来高が平均の何倍かを計算
+volume_ratio = avg_volume > 0 ? volume / avg_volume : 0
+
+// 出来高の上昇・下落判定
+volume_increased = volume > volume[1]
+
+// 出来高急増の条件
+volume_spike = volume_ratio >= volume_multiplier and is_within_time_range and avg_volume > 0
+
+// === 連続アラートを防ぐためのフィルター ===
+var bool alert_triggered = false
+
+// 新しい出来高急増が発生した場合のみアラートを出す
+new_spike = volume_spike and not volume_spike[1] and not alert_triggered
+
+// アラートのリセット（出来高が正常レベルに戻った場合）
+if not volume_spike
+    alert_triggered := false
+
+if new_spike
+    alert_triggered := true
+
+// === プロット ===
+// 出来高をプロット（上昇時は赤、下落時は白）
+volume_color = volume_increased ? color.red : color.white
+plot(volume, title="現在出来高", color=volume_color, style=plot.style_columns)
+
+// 平均出来高をプロット
+plot(avg_volume, title="平均出来高", color=color.yellow, linewidth=2)
+
+// 出来高急増レベルをプロット
+// plot(avg_volume * volume_multiplier, title="急増レベル", color=color.red, linewidth=2, style=plot.style_line)
+
+// 出来高比率をプロット（別ペイン）
+volume_ratio_plot = plot(volume_ratio, title="出来高比率", color=volume_spike ? color.red : color.gray, linewidth=2, precision=2)
+
+// 急増レベルの水平線
+// hline(volume_multiplier, title="急増レベル（比率）", color=color.red, linestyle=hline.style_dashed)
+
+// === 背景色での視覚的表示 ===
+// // 午前セッションの背景色
+// bgcolor(is_morning_session ? color.new(color.green, 95) : na, title="午前取引時間帯")
+
+// // 午後セッションの背景色
+// bgcolor(is_afternoon_session ? color.new(color.blue, 95) : na, title="午後取引時間帯")
+
+// 出来高急増時の背景色
+bgcolor(volume_spike ? color.new(color.red, 80) : na, title="出来高急増")
+
+// === ラベル表示 ===
+if new_spike
+    label.new(bar_index, volume_ratio, 
+              text=str.tostring(volume_ratio, "#.##") + "倍", 
+              style=label.style_label_up, 
+              color=color.red, 
+              textcolor=color.white, 
+              size=size.small)
+
+// === アラート条件（テキスト + 音声） ===
+if new_spike
+    // 基本のテキストアラート
+    alert_message = "出来高が急増しました！\n" + 
+                   "出来高: " + str.tostring(volume, "#") + "\n" + 
+                   "平均出来高: " + str.tostring(avg_volume, "#") + "\n" + 
+                   "倍率: " + str.tostring(volume_ratio, "#.##") + "倍"
+    
+    // alert(alert_message, alert.freq_once_per_bar_close)
+    alert(alert_message, alert.freq_once_per_bar)
+    
+    // 音声通知用の追加アラート
+    // if enable_sound
+    //     sound_message = ""
+    //     switch sound_type
+    //         "Alert" =>
+    //             sound_message := "🚨 Volume Spike Alert! " + str.tostring(volume_ratio, "#.##") + "x average"
+    //         "Ding" =>
+    //             sound_message := "🔔 出来高急増: " + str.tostring(volume_ratio, "#.##") + "倍"
+    //         "Note" =>
+    //             sound_message := "♪ Volume Alert: " + str.tostring(volume_ratio, "#.##") + "x"
+    //         "Bell" =>
+    //             sound_message := "🔔 出来高警告: " + str.tostring(volume_ratio, "#.##") + "倍"
+    //         "Chime" =>
+    //             sound_message := "🎵 Volume Spike: " + str.tostring(volume_ratio, "#.##") + "x"
+    //         "Hand" =>
+    //             sound_message := "👋 出来高急増通知: " + str.tostring(volume_ratio, "#.##") + "倍"
+        
+    //     // 音声通知用の別アラート
+    //     alert(sound_message, alert.freq_once_per_bar_close)
+
+// === テーブル表示（現在の状態） ===
+if barstate.islast
+    var table info_table = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1, border_color=color.black)
+    
+    table.cell(info_table, 0, 0, "項目", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    table.cell(info_table, 1, 0, "値", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.small)
+    
+    table.cell(info_table, 0, 1, "現在出来高", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 1, str.tostring(volume, "#"), text_color=color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, "平均出来高", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 2, str.tostring(avg_volume, "#"), text_color=color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 3, "出来高比率", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 3, str.tostring(volume_ratio, "#.##"), 
+               text_color=volume_spike ? color.red : color.black, text_size=size.small)
+    
+    // table.cell(info_table, 0, 4, "午前セッション", text_color=color.black, text_size=size.small)
+    // table.cell(info_table, 1, 4, is_morning_session ? "○" : "×", 
+    //            text_color=is_morning_session ? color.green : color.gray, text_size=size.small)
+    
+    // table.cell(info_table, 0, 5, "午後セッション", text_color=color.black, text_size=size.small)
+    // table.cell(info_table, 1, 5, is_afternoon_session ? "○" : "×", 
+    //            text_color=is_afternoon_session ? color.blue : color.gray, text_size=size.small)
+    
+    // table.cell(info_table, 0, 6, "取引時間内", text_color=color.black, text_size=size.small)
+    // table.cell(info_table, 1, 6, is_within_time_range ? "○" : "×", 
+    //            text_color=is_within_time_range ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 7, "急増検出", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 7, volume_spike ? "検出" : "なし", 
+               text_color=volume_spike ? color.red : color.green, text_size=size.small)
+    
+    // table.cell(info_table, 0, 8, "音声通知", text_color=color.black, text_size=size.small)
+    // table.cell(info_table, 1, 8, enable_sound ? "ON" : "OFF", 
+    //            text_color=enable_sound ? color.green : color.gray, text_size=size.small)
