@@ -17,11 +17,7 @@ enable_afternoon = input.bool(true, title="午後セッションを有効", grou
 afternoon_start_hour = input.int(12, title="午後開始時間（時）", minval=0, maxval=23, group="取引時間設定")
 afternoon_start_minute = input.int(30, title="午後開始時間（分）", minval=0, maxval=59, group="取引時間設定")
 afternoon_end_hour = input.int(15, title="午後終了時間（時）", minval=0, maxval=23, group="取引時間設定")
-afternoon_end_minute = input.int(0, title="午後終了時間（分）", minval=0, maxval=59, group="取引時間設定")
-
-// === 音声通知設定 ===
-// enable_sound = input.bool(true, title="音声通知を有効にする", tooltip="出来高急増時に音声で通知します", group="通知設定")
-// sound_type = input.string("Alert", title="通知音タイプ", options=["Alert", "Ding", "Note", "Bell", "Chime", "Hand"], tooltip="通知音の種類を選択", group="通知設定")
+afternoon_end_minute = input.int(25, title="午後終了時間（分）", minval=0, maxval=59, group="取引時間設定")
 
 // === 現在の時刻を取得 ===
 current_hour = hour(time, "GMT+9")
@@ -43,9 +39,23 @@ is_afternoon_session = enable_afternoon and (current_time_minutes >= afternoon_s
 // いずれかのセッション中かどうか
 is_within_time_range = is_morning_session or is_afternoon_session
 
+// === ノイズ除外 ===
+// 前足の出来高が0 → 現在足で出来高が発生 = 寄り付きバー（大幅上昇・下落による遅延寄り付き対応）
+is_opening_bar = volume > 0 and volume[1] == 0
+
+// 寄り付きノイズ（時刻固定 9:00〜9:03 + 動的な寄り付き検出）
+is_opening_noise = is_opening_bar or (current_time_minutes >= 9 * 60 and current_time_minutes < 9 * 60 + 4)
+
+// 大引けノイズ（15:25〜15:30）
+is_closing_noise = current_time_minutes >= 15 * 60 + 25 and current_time_minutes <= 15 * 60 + 30
+
+// 寄り付き・大引けノイズをまとめて除外
+is_noise = is_opening_noise or is_closing_noise
+
 // === 出来高の分析 ===
-// 過去の出来高平均を計算
-avg_volume = ta.sma(volume[1], lookback_period)
+// ノイズ時間帯を除外した出来高で平均を計算
+volume_for_avg = is_noise ? na : volume
+avg_volume = ta.sma(volume_for_avg[1], lookback_period)
 
 // 現在の出来高が平均の何倍かを計算
 volume_ratio = avg_volume > 0 ? volume / avg_volume : 0
@@ -77,24 +87,15 @@ plot(volume, title="現在出来高", color=volume_color, style=plot.style_colum
 // 平均出来高をプロット
 plot(avg_volume, title="平均出来高", color=color.yellow, linewidth=2)
 
-// 出来高急増レベルをプロット
-// plot(avg_volume * volume_multiplier, title="急増レベル", color=color.red, linewidth=2, style=plot.style_line)
-
-// 出来高比率をプロット（別ペイン）
+// 出来高比率をプロット
 volume_ratio_plot = plot(volume_ratio, title="出来高比率", color=volume_spike ? color.red : color.gray, linewidth=2, precision=2)
 
-// 急増レベルの水平線
-// hline(volume_multiplier, title="急増レベル（比率）", color=color.red, linestyle=hline.style_dashed)
-
 // === 背景色での視覚的表示 ===
-// // 午前セッションの背景色
-// bgcolor(is_morning_session ? color.new(color.green, 95) : na, title="午前取引時間帯")
-
-// // 午後セッションの背景色
-// bgcolor(is_afternoon_session ? color.new(color.blue, 95) : na, title="午後取引時間帯")
-
 // 出来高急増時の背景色
 bgcolor(volume_spike ? color.new(color.red, 80) : na, title="出来高急増")
+
+// ノイズ時間帯の背景色
+bgcolor(is_noise ? color.new(color.gray, 85) : na, title="ノイズ除外時間帯")
 
 // === ラベル表示 ===
 if new_spike
@@ -105,9 +106,8 @@ if new_spike
               textcolor=color.white, 
               size=size.small)
 
-// === アラート条件（テキスト + 音声） ===
+// === アラート条件 ===
 if new_spike
-    // 基本のテキストアラート
     alert_message = "出来高が急増しました！\n" + 
                    "出来高: " + str.tostring(volume, "#") + "\n" + 
                    "平均出来高: " + str.tostring(avg_volume, "#") + "\n" + 
@@ -131,6 +131,10 @@ if barstate.islast
     table.cell(info_table, 0, 3, "出来高比率", text_color=color.black, text_size=size.small)
     table.cell(info_table, 1, 3, str.tostring(volume_ratio, "#.##"), 
                text_color=volume_spike ? color.red : color.black, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "ノイズ除外中", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 4, is_noise ? "除外中" : "－", 
+               text_color=is_noise ? color.gray : color.black, text_size=size.small)
     
     table.cell(info_table, 0, 7, "急増検出", text_color=color.black, text_size=size.small)
     table.cell(info_table, 1, 7, volume_spike ? "検出" : "なし", 
