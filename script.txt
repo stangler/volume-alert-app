@@ -8,7 +8,7 @@ lookback_period = input.int(20, title="平均出来高の計算期間", minval=5
 // === 午前セッション設定 ===
 enable_morning = input.bool(true, title="午前セッションを有効", group="取引時間設定")
 morning_start_hour = input.int(9, title="午前開始時間（時）", minval=0, maxval=23, group="取引時間設定")
-morning_start_minute = input.int(0, title="午前開始時間（分）", minval=0, maxval=59, group="取引時間設定")
+morning_start_minute = input.int(4, title="午前開始時間（分）", minval=0, maxval=59, group="取引時間設定")
 morning_end_hour = input.int(11, title="午前終了時間（時）", minval=0, maxval=23, group="取引時間設定")
 morning_end_minute = input.int(30, title="午前終了時間（分）", minval=0, maxval=59, group="取引時間設定")
 
@@ -113,28 +113,7 @@ if new_spike
                    "平均出来高: " + str.tostring(avg_volume, "#") + "\n" + 
                    "倍率: " + str.tostring(volume_ratio, "#.##") + "倍"
     
-    // alert(alert_message, alert.freq_once_per_bar_close)
-    alert(alert_message, alert.freq_once_per_bar)
-    
-    // 音声通知用の追加アラート
-    // if enable_sound
-    //     sound_message = ""
-    //     switch sound_type
-    //         "Alert" =>
-    //             sound_message := "🚨 Volume Spike Alert! " + str.tostring(volume_ratio, "#.##") + "x average"
-    //         "Ding" =>
-    //             sound_message := "🔔 出来高急増: " + str.tostring(volume_ratio, "#.##") + "倍"
-    //         "Note" =>
-    //             sound_message := "♪ Volume Alert: " + str.tostring(volume_ratio, "#.##") + "x"
-    //         "Bell" =>
-    //             sound_message := "🔔 出来高警告: " + str.tostring(volume_ratio, "#.##") + "倍"
-    //         "Chime" =>
-    //             sound_message := "🎵 Volume Spike: " + str.tostring(volume_ratio, "#.##") + "x"
-    //         "Hand" =>
-    //             sound_message := "👋 出来高急増通知: " + str.tostring(volume_ratio, "#.##") + "倍"
-        
-    //     // 音声通知用の別アラート
-    //     alert(sound_message, alert.freq_once_per_bar_close)
+    alert(alert_message, alert.freq_all)
 
 // === テーブル表示（現在の状態） ===
 if barstate.islast
@@ -153,22 +132,6 @@ if barstate.islast
     table.cell(info_table, 1, 3, str.tostring(volume_ratio, "#.##"), 
                text_color=volume_spike ? color.red : color.black, text_size=size.small)
     
-    // table.cell(info_table, 0, 4, "午前セッション", text_color=color.black, text_size=size.small)
-    // table.cell(info_table, 1, 4, is_morning_session ? "○" : "×", 
-    //            text_color=is_morning_session ? color.green : color.gray, text_size=size.small)
-    
-    // table.cell(info_table, 0, 5, "午後セッション", text_color=color.black, text_size=size.small)
-    // table.cell(info_table, 1, 5, is_afternoon_session ? "○" : "×", 
-    //            text_color=is_afternoon_session ? color.blue : color.gray, text_size=size.small)
-    
-    // table.cell(info_table, 0, 6, "取引時間内", text_color=color.black, text_size=size.small)
-    // table.cell(info_table, 1, 6, is_within_time_range ? "○" : "×", 
-    //            text_color=is_within_time_range ? color.green : color.red, text_size=size.small)
-    
     table.cell(info_table, 0, 7, "急増検出", text_color=color.black, text_size=size.small)
     table.cell(info_table, 1, 7, volume_spike ? "検出" : "なし", 
                text_color=volume_spike ? color.red : color.green, text_size=size.small)
-    
-    // table.cell(info_table, 0, 8, "音声通知", text_color=color.black, text_size=size.small)
-    // table.cell(info_table, 1, 8, enable_sound ? "ON" : "OFF", 
-    //            text_color=enable_sound ? color.green : color.gray, text_size=size.small)
