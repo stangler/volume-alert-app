@@ -40,39 +40,23 @@ is_afternoon_session = enable_afternoon and (current_time_minutes >= afternoon_s
 is_within_time_range = is_morning_session or is_afternoon_session
 
 // === ノイズ除外 ===
-// 前足の出来高が0 → 現在足で出来高が発生 = 寄り付きバー（大幅上昇・下落による遅延寄り付き対応）
 is_opening_bar = volume > 0 and volume[1] == 0
-
-// 寄り付きノイズ（時刻固定 9:00〜9:03 + 動的な寄り付き検出）
 is_opening_noise = is_opening_bar or (current_time_minutes >= 9 * 60 and current_time_minutes < 9 * 60 + 4)
-
-// 大引けノイズ（15:25〜15:30）
+is_afternoon_opening_noise = current_time_minutes >= 12 * 60 + 30 and current_time_minutes < 12 * 60 + 32  // 後場寄り付きノイズ
 is_closing_noise = current_time_minutes >= 15 * 60 + 25 and current_time_minutes <= 15 * 60 + 30
-
-// 寄り付き・大引けノイズをまとめて除外
-is_noise = is_opening_noise or is_closing_noise
+is_noise = is_opening_noise or is_afternoon_opening_noise or is_closing_noise
 
 // === 出来高の分析 ===
-// ノイズ時間帯を除外した出来高で平均を計算
 volume_for_avg = is_noise ? na : volume
 avg_volume = ta.sma(volume_for_avg[1], lookback_period)
-
-// 現在の出来高が平均の何倍かを計算
 volume_ratio = avg_volume > 0 ? volume / avg_volume : 0
-
-// 出来高の上昇・下落判定
 volume_increased = volume > volume[1]
-
-// 出来高急増の条件
 volume_spike = volume_ratio >= volume_multiplier and is_within_time_range and avg_volume > 0
 
 // === 連続アラートを防ぐためのフィルター ===
 var bool alert_triggered = false
-
-// 新しい出来高急増が発生した場合のみアラートを出す
 new_spike = volume_spike and not volume_spike[1] and not alert_triggered
 
-// アラートのリセット（出来高が正常レベルに戻った場合）
 if not volume_spike
     alert_triggered := false
 
@@ -80,21 +64,13 @@ if new_spike
     alert_triggered := true
 
 // === プロット ===
-// 出来高をプロット（上昇時は赤、下落時は白）
 volume_color = volume_increased ? color.red : color.white
 plot(volume, title="現在出来高", color=volume_color, style=plot.style_columns)
-
-// 平均出来高をプロット
 plot(avg_volume, title="平均出来高", color=color.yellow, linewidth=2)
-
-// 出来高比率をプロット
 volume_ratio_plot = plot(volume_ratio, title="出来高比率", color=volume_spike ? color.red : color.gray, linewidth=2, precision=2)
 
-// === 背景色での視覚的表示 ===
-// 出来高急増時の背景色
+// === 背景色 ===
 bgcolor(volume_spike ? color.new(color.red, 80) : na, title="出来高急増")
-
-// ノイズ時間帯の背景色
 bgcolor(is_noise ? color.new(color.gray, 85) : na, title="ノイズ除外時間帯")
 
 // === ラベル表示 ===
@@ -108,14 +84,14 @@ if new_spike
 
 // === アラート条件 ===
 if new_spike
-    alert_message = "出来高が急増しました！\n" + 
+    alert_message = syminfo.ticker + " / " + syminfo.description + "\n" +
+                   "出来高が急増しました！\n" + 
                    "出来高: " + str.tostring(volume, "#") + "\n" + 
                    "平均出来高: " + str.tostring(avg_volume, "#") + "\n" + 
                    "倍率: " + str.tostring(volume_ratio, "#.##") + "倍"
-    
     alert(alert_message, alert.freq_all)
 
-// === テーブル表示（現在の状態） ===
+// === テーブル表示 ===
 if barstate.islast
     var table info_table = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1, border_color=color.black)
     
