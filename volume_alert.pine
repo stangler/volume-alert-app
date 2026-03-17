@@ -5,9 +5,6 @@ indicator("出来高急増アラート", overlay=false)
 volume_multiplier = input.float(2.0, title="出来高倍率", minval=1.0, maxval=10.0, step=0.1, tooltip="平均出来高の何倍で急増と判定するか")
 lookback_period = input.int(20, title="平均出来高の計算期間", minval=5, maxval=100, tooltip="過去何本のローソク足で平均出来高を計算するか")
 
-// === 方向フィルター ===
-direction_filter = input.string("両方", title="アラート方向フィルター", options=["両方", "上昇のみ", "下落のみ"], tooltip="出来高急増時に、ローソク足の方向でアラートを絞り込む（close vs open で判定）")
-
 // === 午前セッション設定 ===
 enable_morning = input.bool(true, title="午前セッションを有効", group="取引時間設定")
 morning_start_hour = input.int(9, title="午前開始時間（時）", minval=0, maxval=23, group="取引時間設定")
@@ -26,46 +23,51 @@ afternoon_end_minute = input.int(25, title="午後終了時間（分）", minval
 current_hour = hour(time, "GMT+9")
 current_min = minute(time, "GMT+9")
 
+// 指定時間帯内かどうかの判定
 morning_start_time_minutes = morning_start_hour * 60 + morning_start_minute
 morning_end_time_minutes = morning_end_hour * 60 + morning_end_minute
 afternoon_start_time_minutes = afternoon_start_hour * 60 + afternoon_start_minute
 afternoon_end_time_minutes = afternoon_end_hour * 60 + afternoon_end_minute
 current_time_minutes = current_hour * 60 + current_min
 
+// 午前セッション中かどうか
 is_morning_session = enable_morning and (current_time_minutes >= morning_start_time_minutes and current_time_minutes <= morning_end_time_minutes)
+
+// 午後セッション中かどうか
 is_afternoon_session = enable_afternoon and (current_time_minutes >= afternoon_start_time_minutes and current_time_minutes <= afternoon_end_time_minutes)
+
+// いずれかのセッション中かどうか
 is_within_time_range = is_morning_session or is_afternoon_session
 
 // === ノイズ除外 ===
 is_opening_bar = volume > 0 and volume[1] == 0
 is_opening_noise = is_opening_bar or (current_time_minutes >= 9 * 60 and current_time_minutes < 9 * 60 + 4)
+is_afternoon_opening_noise = current_time_minutes >= 12 * 60 + 30 and current_time_minutes < 12 * 60 + 32  // 後場寄り付きノイズ
 is_closing_noise = current_time_minutes >= 15 * 60 + 25 and current_time_minutes <= 15 * 60 + 30
-is_noise = is_opening_noise or is_closing_noise
-
-// === 方向判定（現在足の close vs open）===
-is_bullish = close > open   // 陽線（上昇）
-is_bearish = close < open   // 陰線（下落）
-
-direction_ok = switch direction_filter
-    "上昇のみ" => is_bullish
-    "下落のみ" => is_bearish
-    => true  // "両方"
+is_noise = is_opening_noise or is_afternoon_opening_noise or is_closing_noise
 
 // === 出来高の分析 ===
 volume_for_avg = is_noise ? na : volume
 avg_volume = ta.sma(volume_for_avg[1], lookback_period)
 volume_ratio = avg_volume > 0 ? volume / avg_volume : 0
 volume_increased = volume > volume[1]
-volume_spike = volume_ratio >= volume_multiplier and is_within_time_range and avg_volume > 0 and direction_ok
+volume_spike = volume_ratio >= volume_multiplier and is_within_time_range and avg_volume > 0
 
 // === 連続アラートを防ぐためのフィルター ===
-new_spike = volume_spike and not volume_spike[1]
+var bool alert_triggered = false
+new_spike = volume_spike and not volume_spike[1] and not alert_triggered
+
+if not volume_spike
+    alert_triggered := false
+
+if new_spike
+    alert_triggered := true
 
 // === プロット ===
 volume_color = volume_increased ? color.red : color.white
 plot(volume, title="現在出来高", color=volume_color, style=plot.style_columns)
 plot(avg_volume, title="平均出来高", color=color.yellow, linewidth=2)
-plot(volume_ratio, title="出来高比率", color=volume_spike ? color.red : color.gray, linewidth=2, precision=2)
+volume_ratio_plot = plot(volume_ratio, title="出来高比率", color=volume_spike ? color.red : color.gray, linewidth=2, precision=2)
 
 // === 背景色 ===
 bgcolor(volume_spike ? color.new(color.red, 80) : na, title="出来高急増")
@@ -82,42 +84,34 @@ if new_spike
 
 // === アラート条件 ===
 if new_spike
-    direction_label = is_bullish ? "↑上昇" : is_bearish ? "↓下落" : "→横ばい"
     alert_message = syminfo.ticker + " / " + syminfo.description + "\n" +
-                   "出来高が急増しました！ " + direction_label + "\n" +
-                   "出来高: " + str.tostring(volume, "#") + "\n" +
-                   "平均出来高: " + str.tostring(avg_volume, "#") + "\n" +
+                   "出来高が急増しました！\n" + 
+                   "出来高: " + str.tostring(volume, "#") + "\n" + 
+                   "平均出来高: " + str.tostring(avg_volume, "#") + "\n" + 
                    "倍率: " + str.tostring(volume_ratio, "#.##") + "倍"
     alert(alert_message, alert.freq_all)
 
 // === テーブル表示 ===
 if barstate.islast
-    var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1, border_color=color.black)
-
+    var table info_table = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1, border_color=color.black)
+    
     table.cell(info_table, 0, 0, "項目", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.small)
     table.cell(info_table, 1, 0, "値", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.small)
-
+    
     table.cell(info_table, 0, 1, "現在出来高", text_color=color.black, text_size=size.small)
     table.cell(info_table, 1, 1, str.tostring(volume, "#"), text_color=color.black, text_size=size.small)
-
+    
     table.cell(info_table, 0, 2, "平均出来高", text_color=color.black, text_size=size.small)
     table.cell(info_table, 1, 2, str.tostring(avg_volume, "#"), text_color=color.black, text_size=size.small)
-
+    
     table.cell(info_table, 0, 3, "出来高比率", text_color=color.black, text_size=size.small)
-    table.cell(info_table, 1, 3, str.tostring(volume_ratio, "#.##"),
+    table.cell(info_table, 1, 3, str.tostring(volume_ratio, "#.##"), 
                text_color=volume_spike ? color.red : color.black, text_size=size.small)
-
-    table.cell(info_table, 0, 4, "足の方向", text_color=color.black, text_size=size.small)
-    table.cell(info_table, 1, 4, is_bullish ? "↑上昇" : is_bearish ? "↓下落" : "→横ばい",
-               text_color=is_bullish ? color.red : is_bearish ? color.blue : color.black, text_size=size.small)
-
-    table.cell(info_table, 0, 5, "方向フィルター", text_color=color.black, text_size=size.small)
-    table.cell(info_table, 1, 5, direction_filter, text_color=color.black, text_size=size.small)
-
-    table.cell(info_table, 0, 6, "ノイズ除外中", text_color=color.black, text_size=size.small)
-    table.cell(info_table, 1, 6, is_noise ? "除外中" : "－",
+    
+    table.cell(info_table, 0, 4, "ノイズ除外中", text_color=color.black, text_size=size.small)
+    table.cell(info_table, 1, 4, is_noise ? "除外中" : "－", 
                text_color=is_noise ? color.gray : color.black, text_size=size.small)
-
+    
     table.cell(info_table, 0, 7, "急増検出", text_color=color.black, text_size=size.small)
-    table.cell(info_table, 1, 7, volume_spike ? "検出" : "なし",
+    table.cell(info_table, 1, 7, volume_spike ? "検出" : "なし", 
                text_color=volume_spike ? color.red : color.green, text_size=size.small)
